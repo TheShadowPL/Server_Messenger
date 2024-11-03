@@ -52,9 +52,13 @@ def send_heartbeat():
         time.sleep(58)
 
 
-def create_chat(name):
-    print("Stworzono Chat : " + name)
-
+def create_chat(first_user_id, second_user_id):
+    url = f"{BASE_URL}/createChat"
+    try:
+        response = requests.post(url, json={"first_user_id": first_user_id, "second_user_id": second_user_id})
+        print(response.json())
+    except requests.exceptions.RequestException as e:
+        print("Nie mozna bylo utworzyc czatu", e)
 
 def send_message(content):
     print('Wysłano wiadomosc : ' + content)
@@ -78,7 +82,12 @@ def get_activity(userId):
         print("Błąd przy sprawdzaniu aktywności:", e)
 
 def get_chats():
-    print('Chaty :')
+    url = f"{BASE_URL}/getChats"
+    try:
+        response = requests.get(url)
+        print(response.json())
+    except requests.exceptions.RequestException as e:
+        print("Nie mozna bylo uzyskac czatow", e)
 
 
 def get_messages():
@@ -120,8 +129,9 @@ def main():
             print(login_user(username, password))
 
         elif choice == "3":
-            chat_name = input("Podaj nazwę czatu: ")
-            print(create_chat(chat_name))
+            first_user_id = input("Podaj id pierwszego uzytkownika: ")
+            second_user_id = input("Podaj id drugiego uzytkownika: ")
+            print(create_chat(first_user_id, second_user_id))
 
         elif choice == "4":
             content = input("Podaj treść wiadomości: ")

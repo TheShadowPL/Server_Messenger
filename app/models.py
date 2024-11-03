@@ -29,4 +29,41 @@ class User(Base):
     def check_password(self, password):
         return bcrypt.check_password_hash(self.password_hash, password)
 
+class Chat(Base):
+    __tablename__ = 'chats'
+
+    id = Column(Integer, primary_key=True)
+    first_user = Column(Integer, unique=False, nullable=False)
+    second_user = Column(Integer, unique=False, nullable=False)
+
+class Message(Base):
+    __tablename__ = 'messages'
+
+    id = Column(Integer, primary_key=True)
+    chat_id = Column(Integer, ForeignKey('chats.id'), nullable=False)
+    message = Column(Text, nullable=False)
+    author_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+class GroupChat(Base):
+    __tablename__ = 'group_chats'
+
+    id = Column(Integer, primary_key=True)
+    chat_id = Column(Integer, unique=True, nullable=False)
+    members = Column(Text , unique=False, nullable=False)
+
+    messages = relationship("GroupMessages", back_populates="group_chat", cascade="all, delete-orphan")
+
+
+class GroupMessages(Base):
+    __tablename__ = 'group_messages'
+
+    id = Column(Integer, primary_key=True)
+    group_chat_id = Column(Integer, ForeignKey('group_chats.id', ondelete='CASCADE'), nullable=False)
+    sender_id = Column(Integer, nullable=False)
+    content = Column(Text, nullable=False)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    group_chat = relationship("GroupChat", back_populates="messages")
+
 Base.metadata.create_all(engine)

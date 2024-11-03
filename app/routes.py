@@ -1,6 +1,6 @@
 from datetime import datetime
 from flask import Blueprint, request, jsonify
-from .models import session, User
+from .models import session, User, Chat, Message
 
 bp = Blueprint('routes', __name__)
 
@@ -91,7 +91,44 @@ def getActivity():
     user = session.query(User).get(user_id)
     return jsonify({'isActive': user.is_active})
 
+@bp.route('/createChat', methods=['POST'])
+def createChat():
+    data = request.get_json()
+    first_user_id = data.get('first_user_id')
+    second_user_id = data.get('second_user_id')
+    new_chat = Chat(first_user=first_user_id, second_user=second_user_id)
+    session.add(new_chat)
+    try:
+        session.commit()
+        return jsonify({"message": "Stworzenie czatu zakończonę sukcesem", "chat_id": new_chat.id})
+    except:
+        return jsonify({"error": "Tworzenie czatu nie powiodło się"}), 400
+
+@bp.route('/getChats', methods=['GET'])
+def getChats():
+    chats = session.query(Chat).all()
+    chat_list = []
+
+    for chat in chats:
+        chat_data = {
+            'chat_id': chat.id,
+            'first_user': chat.first_user,
+            'second_user': chat.second_user,
+        }
+        chat_list.append(chat_data)
+
+    return jsonify(chat_list)
 
 @bp.route('/sendMessage', methods=['POST'])
 def sendMessage():
-    return
+    data = request.get_json()
+    chat_id = data.get('chat_id')
+    message = data.get('message')
+    new_message = Message(chat_id=chat_id, message=message)
+
+
+@bp.route('/CreateGroupChat', methods=['POST'])
+def createGroupChat():
+    data = request.get_json()
+    chat_id = data.get('chat_id')
+
