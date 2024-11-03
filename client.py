@@ -69,7 +69,13 @@ def get_users():
     except requests.exceptions.RequestException as e:
         print("Błąd przy pobieraniu listy użytkowników:", e)
 
-
+def get_activity(userId):
+    url = f"{BASE_URL}/getActivity"
+    try:
+        response = requests.get(url, json={"user_id": userId})
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print("Błąd przy sprawdzaniu aktywności:", e)
 
 def get_chats():
     print('Chaty :')
@@ -93,7 +99,8 @@ def menu():
     print("7. Pobierz wiadomości z bieżącego czatu")
     print("8. Wybierz czat")
     print("9. Pokaż informacje o sesji")
-    print("10. Wyjście")
+    print("10. Czy użytkownik jest aktywny")
+    print("11. Wyjście")
     return input("Wybierz opcję: ")
 
 
@@ -140,6 +147,11 @@ def main():
             print(f"Bieżący czat: Brak")
 
         elif choice == "10":
+            print("\n--- Czy użytkownik jest aktywny ---")
+            userId = input("Wprowadź id usera do sprawdzenia: ")
+            print(get_activity(userId))
+
+        elif choice == "11":
             print("Zamykanie klienta...")
             session_info["current_user"] = None
             break

@@ -84,6 +84,14 @@ def getUsers():
     
     return jsonify(users_list)
 
+@bp.route('/getActivity', methods=['GET'])
+def getActivity():
+    data = request.get_json()
+    user_id = data.get('user_id')
+    user = session.query(User).get(user_id)
+    return jsonify({'isActive': user.is_active})
+
+
 @bp.route('/sendMessage', methods=['POST'])
 def sendMessage():
     return
