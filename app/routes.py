@@ -66,3 +66,24 @@ def heartbeat():
         return jsonify({"message": "otrzymano ping"})
     else:
         return jsonify({"error": "Użytkownik nie znaleziony"}), 404
+    
+@bp.route('/getUsers', methods=['GET'])
+def getUsers():
+    users = session.query(User).all()
+    users_list = []
+    
+    for user in users:
+        user_data = {
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'is_active': user.is_active,
+            'last_seen': user.last_seen.isoformat() if user.last_seen else None
+        }
+        users_list.append(user_data)
+    
+    return jsonify(users_list)
+
+@bp.route('/sendMessage', methods=['POST'])
+def sendMessage():
+    return

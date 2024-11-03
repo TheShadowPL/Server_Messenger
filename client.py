@@ -61,7 +61,14 @@ def send_message(content):
 
 
 def get_users():
-    print('Uzytkownicy :')
+    url = f"{BASE_URL}/getUsers"
+    try:
+        response = requests.get(url)
+        users = response.json()
+        return users
+    except requests.exceptions.RequestException as e:
+        print("Błąd przy pobieraniu listy użytkowników:", e)
+
 
 
 def get_chats():
