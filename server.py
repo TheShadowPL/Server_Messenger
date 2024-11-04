@@ -20,7 +20,7 @@ def check_user_activity():
         sleep(60)
 
 
-Thread(target=check_user_activity, daemon=True).start()
+# Thread(target=check_user_activity, daemon=True).start()
 
 
 if __name__ == "__main__":

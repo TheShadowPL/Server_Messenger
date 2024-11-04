@@ -1,11 +1,12 @@
-import time
 from functools import wraps
 from flask import Blueprint, request, jsonify, g
-from datetime import datetime
 from .models import session, User, Chat, Message
+import secrets
 
 bp = Blueprint('routes', __name__)
 
+def generate_token():
+    return secrets.token_hex(32)
 
 def login_required(f):
     @wraps(f)
@@ -14,12 +15,8 @@ def login_required(f):
         if not auth_token:
             return jsonify({"error": "Brak tokenu autoryzacji"}), 401
 
-        user_id = auth_token.split(' ')[1] if len(auth_token.split(' ')) > 1 else None
-        user = session.query(User).get(user_id)
-
-        if not user:
-            return jsonify({"error": "test"}), 401
-        if not user.is_active:
+        user = session.query(User).filter_by(token=auth_token).first()
+        if not user or not user.is_active:
             return jsonify({"error": "Nieautoryzowany dostęp"}), 401
 
         g.current_user = user
@@ -47,8 +44,7 @@ def register():
 
     return jsonify({
         "message": "Rejestracja zakończona sukcesem",
-        "user_id": new_user.id,
-        "token": str(new_user.id)
+        "user_id": new_user.id
     })
 
 
@@ -60,12 +56,14 @@ def login():
 
     user = session.query(User).filter_by(username=username).first()
     if user and user.check_password(password):
+        user.token = generate_token()
         user.is_active = True
         session.commit()
+
         return jsonify({
             "message": "Zalogowano pomyślnie",
             "user_id": user.id,
-            "token": str(user.id)
+            "token": user.token
         })
     else:
         return jsonify({"error": "Nieprawidłowa nazwa użytkownika lub hasło"}), 401
@@ -76,9 +74,9 @@ def login():
 def logout():
     current_user = g.current_user
     current_user.is_active = False
+    current_user.token = None
     session.commit()
     return jsonify({"message": "Wylogowano pomyślnie"})
-
 
 @bp.route('/protected', methods=['GET'])
 @login_required
