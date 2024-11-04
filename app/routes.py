@@ -5,6 +5,7 @@ from .models import session, User, Chat, Message
 bp = Blueprint('routes', __name__)
 
 
+
 @bp.route('/register', methods=['POST'])
 def register():
     data = request.get_json()
@@ -23,6 +24,7 @@ def register():
     session.commit()
 
     return jsonify({"message": "Rejestracja zakończona sukcesem", "user_id": new_user.id})
+
 
 
 @bp.route('/login', methods=['POST'])
@@ -132,3 +134,80 @@ def createGroupChat():
     data = request.get_json()
     chat_id = data.get('chat_id')
 
+
+@bp.route('/getUsers', methods=['GET'])
+def getUsers():
+    users = session.query(User).all()
+    users_list = []
+
+    for user in users:
+        user_data = {
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'is_active': user.is_active,
+            'last_seen': user.last_seen.isoformat() if user.last_seen else None
+        }
+        users_list.append(user_data)
+
+    return jsonify(users_list)
+
+
+@bp.route('/getActivity', methods=['GET'])
+def getActivity():
+    data = request.get_json()
+    user_id = data.get('user_id')
+    user = session.query(User).get(user_id)
+    return jsonify({'isActive': user.is_active})
+
+
+@bp.route('/createChat', methods=['POST'])
+@login_required
+def createChat():
+    data = request.get_json()
+    second_user_id = data.get('second_user_id')
+    new_chat = Chat(first_user=g.current_user.id, second_user=second_user_id)
+    session.add(new_chat)
+    try:
+        session.commit()
+        return jsonify({"message": "Stworzenie czatu zakończonę sukcesem", "chat_id": new_chat.id})
+    except:
+        return jsonify({"error": "Tworzenie czatu nie powiodło się"}), 400
+
+
+@bp.route('/getChats', methods=['GET'])
+def getChats():
+    chats = session.query(Chat).all()
+    chat_list = []
+
+    for chat in chats:
+        chat_data = {
+            'chat_id': chat.id,
+            'first_user': chat.first_user,
+            'second_user': chat.second_user,
+        }
+        chat_list.append(chat_data)
+
+    return jsonify(chat_list)
+
+
+@bp.route('/sendMessage', methods=['POST'])
+@login_required
+def sendMessage():
+    data = request.get_json()
+    chat_id = data.get('chat_id')
+    message = data.get('message')
+    new_message = Message(chat_id=chat_id, message=message, author_id=g.current_user.id)
+    session.add(new_message)
+    try:
+        session.commit()
+        return jsonify({"message": "Wysyłano wiadomość", "chat_id": chat_id})
+    except:
+        return jsonify({"error": "Wysyłanie wiadomości nie powiodło się"}), 400
+
+
+@bp.route('/CreateGroupChat', methods=['POST'])
+@login_required
+def createGroupChat():
+    data = request.get_json()
+    chat_id = data.get('chat_id')
