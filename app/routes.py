@@ -127,7 +127,8 @@ def createChat():
     try:
         session.commit()
         return jsonify({"message": "Stworzenie czatu zakończonę sukcesem", "chat_id": new_chat.id})
-    except:
+    except Exception as e:
+        print(e)
         return jsonify({"error": "Tworzenie czatu nie powiodło się"}), 400
 
 
