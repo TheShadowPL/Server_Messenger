@@ -1,9 +1,31 @@
+import time
+from functools import wraps
+from flask import Blueprint, request, jsonify, g
 from datetime import datetime
-from flask import Blueprint, request, jsonify
 from .models import session, User, Chat, Message
 
 bp = Blueprint('routes', __name__)
 
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        auth_token = request.headers.get('Authorization')
+        if not auth_token:
+            return jsonify({"error": "Brak tokenu autoryzacji"}), 401
+
+        user_id = auth_token.split(' ')[1] if len(auth_token.split(' ')) > 1 else None
+        user = session.query(User).get(user_id)
+
+        if not user:
+            return jsonify({"error": "test"}), 401
+        if not user.is_active:
+            return jsonify({"error": "Nieautoryzowany dostęp"}), 401
+
+        g.current_user = user
+        return f(*args, **kwargs)
+
+    return decorated_function
 
 
 @bp.route('/register', methods=['POST'])
@@ -23,8 +45,11 @@ def register():
     session.add(new_user)
     session.commit()
 
-    return jsonify({"message": "Rejestracja zakończona sukcesem", "user_id": new_user.id})
-
+    return jsonify({
+        "message": "Rejestracja zakończona sukcesem",
+        "user_id": new_user.id,
+        "token": str(new_user.id)
+    })
 
 
 @bp.route('/login', methods=['POST'])
@@ -37,102 +62,35 @@ def login():
     if user and user.check_password(password):
         user.is_active = True
         session.commit()
-        return jsonify({"message": "Zalogowano pomyślnie", "user_id": user.id})
+        return jsonify({
+            "message": "Zalogowano pomyślnie",
+            "user_id": user.id,
+            "token": str(user.id)
+        })
     else:
         return jsonify({"error": "Nieprawidłowa nazwa użytkownika lub hasło"}), 401
 
 
 @bp.route('/logout', methods=['POST'])
+@login_required
 def logout():
-    data = request.get_json()
-    user_id = data.get('user_id')
+    current_user = g.current_user
+    current_user.is_active = False
+    session.commit()
+    return jsonify({"message": "Wylogowano pomyślnie"})
 
-    user = session.query(User).get(user_id)
-    if user:
-        user.is_active = False
-        session.commit()
-        return jsonify({"message": "Wylogowano pomyślnie"})
-    else:
-        return jsonify({"error": "Użytkownik nie znaleziony"}), 404
 
-@bp.route('/heartbeat', methods=['POST'])
-def heartbeat():
-    data = request.get_json()
-    user_id = data.get('user_id')
-
-    user = session.query(User).get(user_id)
-    if user:
-        user.last_seen = datetime.utcnow()
-        user.is_active = True
-        session.commit()
-        return jsonify({"message": "otrzymano ping"})
-    else:
-        return jsonify({"error": "Użytkownik nie znaleziony"}), 404
-    
-@bp.route('/getUsers', methods=['GET'])
-def getUsers():
-    users = session.query(User).all()
-    users_list = []
-    
-    for user in users:
-        user_data = {
-            'id': user.id,
-            'username': user.username,
-            'email': user.email,
-            'is_active': user.is_active,
-            'last_seen': user.last_seen.isoformat() if user.last_seen else None
+@bp.route('/protected', methods=['GET'])
+@login_required
+def protected():
+    return jsonify({
+        "message": f"Witaj {g.current_user.username}! To jest chroniona trasa.",
+        "user_data": {
+            "id": g.current_user.id,
+            "username": g.current_user.username,
+            "email": g.current_user.email
         }
-        users_list.append(user_data)
-    
-    return jsonify(users_list)
-
-@bp.route('/getActivity', methods=['GET'])
-def getActivity():
-    data = request.get_json()
-    user_id = data.get('user_id')
-    user = session.query(User).get(user_id)
-    return jsonify({'isActive': user.is_active})
-
-@bp.route('/createChat', methods=['POST'])
-def createChat():
-    data = request.get_json()
-    first_user_id = data.get('first_user_id')
-    second_user_id = data.get('second_user_id')
-    new_chat = Chat(first_user=first_user_id, second_user=second_user_id)
-    session.add(new_chat)
-    try:
-        session.commit()
-        return jsonify({"message": "Stworzenie czatu zakończonę sukcesem", "chat_id": new_chat.id})
-    except:
-        return jsonify({"error": "Tworzenie czatu nie powiodło się"}), 400
-
-@bp.route('/getChats', methods=['GET'])
-def getChats():
-    chats = session.query(Chat).all()
-    chat_list = []
-
-    for chat in chats:
-        chat_data = {
-            'chat_id': chat.id,
-            'first_user': chat.first_user,
-            'second_user': chat.second_user,
-        }
-        chat_list.append(chat_data)
-
-    return jsonify(chat_list)
-
-@bp.route('/sendMessage', methods=['POST'])
-def sendMessage():
-    data = request.get_json()
-    chat_id = data.get('chat_id')
-    message = data.get('message')
-    new_message = Message(chat_id=chat_id, message=message)
-
-
-@bp.route('/CreateGroupChat', methods=['POST'])
-def createGroupChat():
-    data = request.get_json()
-    chat_id = data.get('chat_id')
+    })
 
 
 @bp.route('/getUsers', methods=['GET'])
