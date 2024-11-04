@@ -53,22 +53,22 @@ class Message(Base):
 class GroupChat(Base):
     __tablename__ = 'group_chats'
 
-    id = Column(Integer, primary_key=True)
-    chat_id = Column(Integer, unique=True, nullable=False)
-    members = Column(Text , unique=False, nullable=False)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    members = Column(Text, nullable=False)
 
     messages = relationship("GroupMessages", back_populates="group_chat", cascade="all, delete-orphan")
-
 
 class GroupMessages(Base):
     __tablename__ = 'group_messages'
 
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     group_chat_id = Column(Integer, ForeignKey('group_chats.id', ondelete='CASCADE'), nullable=False)
     sender_id = Column(Integer, nullable=False)
     content = Column(Text, nullable=False)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     group_chat = relationship("GroupChat", back_populates="messages")
+
+
 
 Base.metadata.create_all(engine)

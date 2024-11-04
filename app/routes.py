@@ -1,5 +1,9 @@
+import json
+import time
 from functools import wraps
 from flask import Blueprint, request, jsonify, g
+from datetime import datetime
+from .models import session, User, Chat, Message, GroupChat, GroupMessages
 from .models import session, User, Chat, Message
 import secrets
 
@@ -12,6 +16,7 @@ def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         auth_token = request.headers.get('Authorization')
+        print(auth_token)
         if not auth_token:
             return jsonify({"error": "Brak tokenu autoryzacji"}), 401
 
@@ -77,6 +82,7 @@ def logout():
     current_user.token = None
     session.commit()
     return jsonify({"message": "Wylogowano pomyślnie"})
+
 
 @bp.route('/protected', methods=['GET'])
 @login_required
@@ -167,4 +173,93 @@ def sendMessage():
 @login_required
 def createGroupChat():
     data = request.get_json()
-    chat_id = data.get('chat_id')
+    members = data.get('members')
+
+    if not members or not isinstance(members, list):
+        return jsonify({"error": "Lista członków jest wymagana i powinna być typu list"}), 400
+
+    if g.current_user.id not in members:
+        members.append(g.current_user.id)
+
+    new_group_chat = GroupChat(members=json.dumps(members))
+    session.add(new_group_chat)
+    session.commit()
+
+    return jsonify({
+        "message": "Czat grupowy został pomyślnie utworzony",
+        "group_chat_id": new_group_chat.id
+    }), 201
+
+
+@bp.route('/sendGroupMessage', methods=['POST'])
+@login_required
+def sendGroupMessage():
+    data = request.get_json()
+    group_chat_id = data.get('group_chat_id')
+    content = data.get('content')
+
+    if not group_chat_id or not content:
+        return jsonify({"error": "group_chat_id i treść wiadomości są wymagane"}), 400
+
+    group_chat = session.query(GroupChat).filter_by(id=group_chat_id).first()
+    if not group_chat:
+        return jsonify({"error": "Czat grupowy nie istnieje"}), 404
+
+    new_message = GroupMessages(
+        group_chat_id=group_chat_id,
+        sender_id=g.current_user.id,
+        content=content
+    )
+    session.add(new_message)
+    session.commit()
+
+    return jsonify({"message": "Wiadomość grupowa została wysłana", "sender_id": g.current_user.id}), 201
+
+@bp.route('/inviteToGroupChat', methods=['POST'])
+@login_required
+def invite_to_group_chat():
+    data = request.get_json()
+    group_chat_id = data.get('group_chat_id')
+    user_id = data.get('user_id')
+    print(group_chat_id, user_id)
+    if not group_chat_id or not user_id:
+        return jsonify({"error": "group_chat_id i user_id są wymagane"}), 400
+
+    group_chat = session.query(GroupChat).filter_by(id=group_chat_id).first()
+    if not group_chat:
+        return jsonify({"error": "Czat grupowy nie istnieje"}), 404
+
+    members = json.loads(group_chat.members)
+    if user_id in members:
+        return jsonify({"error": "Użytkownik jest już członkiem czatu grupowego"}), 400
+
+    members.append(user_id)
+    group_chat.members = json.dumps(members)
+    session.commit()
+
+    return jsonify({"message": "Użytkownik został pomyślnie zaproszony do czatu grupowego"}), 200
+
+@bp.route('/getGroupMessages', methods=['GET'])
+@login_required
+def get_group_messages():
+    group_chat_id = request.args.get('group_chat_id')
+
+    if not group_chat_id:
+        return jsonify({"error": "group_chat_id jest wymagane"}), 400
+
+    group_chat = session.query(GroupChat).filter_by(id=group_chat_id).first()
+    if not group_chat:
+        return jsonify({"error": "Czat grupowy nie istnieje"}), 404
+
+    messages = session.query(GroupMessages).filter_by(group_chat_id=group_chat_id).all()
+    messages_list = [
+        {
+            "id": message.id,
+            "sender_id": message.sender_id,
+            "content": message.content,
+            "timestamp": message.timestamp.isoformat()
+        }
+        for message in messages
+    ]
+
+    return jsonify(messages_list), 200
