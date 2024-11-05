@@ -1,13 +1,45 @@
 import json
-import time
 from functools import wraps
 from flask import Blueprint, request, jsonify, g
-from datetime import datetime
 from .models import session, User, Chat, Message, GroupChat, GroupMessages
-from .models import session, User, Chat, Message
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.backends import default_backend
+import base64
 import secrets
 
 bp = Blueprint('routes', __name__)
+
+def generate_rsa_keys():
+    private_key = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048,
+        backend=default_backend()
+    )
+    public_key = private_key.public_key()
+    return private_key, public_key
+
+def encrypt_message(message, public_key):
+    ciphertext = public_key.encrypt(
+        message.encode(),
+        rsa.OAEP(
+            mgf=rsa.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    return base64.b64encode(ciphertext).decode()
+
+def decrypt_message(ciphertext, private_key):
+    plaintext = private_key.decrypt(
+        base64.b64decode(ciphertext),
+        rsa.OAEP(
+            mgf=rsa.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    return plaintext.decode()
 
 def generate_token():
     return secrets.token_hex(32)
@@ -42,7 +74,16 @@ def register():
     if session.query(User).filter_by(email=email).first():
         return jsonify({"error": "Email jest już używany"}), 400
 
-    new_user = User(username=username, email=email)
+    private_key, public_key = generate_rsa_keys()
+
+    new_user = User(
+        username=username,
+        email=email,
+        public_key=public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        ).decode()
+    )
     new_user.set_password(password)
     session.add(new_user)
     session.commit()
@@ -68,11 +109,11 @@ def login():
         return jsonify({
             "message": "Zalogowano pomyślnie",
             "user_id": user.id,
-            "token": user.token
+            "token": user.token,
+            "public_key": user.public_key
         })
     else:
         return jsonify({"error": "Nieprawidłowa nazwa użytkownika lub hasło"}), 401
-
 
 @bp.route('/logout', methods=['POST'])
 @login_required
@@ -128,15 +169,26 @@ def getActivity():
 def createChat():
     data = request.get_json()
     second_user_id = data.get('second_user_id')
-    new_chat = Chat(first_user=g.current_user.id, second_user=second_user_id)
+
+    second_user = session.query(User).filter_by(id=second_user_id).first()
+    if not second_user:
+        return jsonify({"error": "Użytkownik o podanym ID nie istnieje"}), 404
+
+    existing_chat = session.query(Chat).filter(
+        (Chat.first_user_id == g.current_user.id) & (Chat.second_user_id == second_user_id) |
+        (Chat.first_user_id == second_user_id) & (Chat.second_user_id == g.current_user.id)
+    ).first()
+    if existing_chat:
+        return jsonify({"error": "Czat z tym użytkownikiem już istnieje", "chat_id": existing_chat.id}), 409
+
+    new_chat = Chat(first_user_id=g.current_user.id, second_user_id=second_user_id)
     session.add(new_chat)
     try:
         session.commit()
-        return jsonify({"message": "Stworzenie czatu zakończonę sukcesem", "chat_id": new_chat.id})
+        return jsonify({"message": "Stworzenie czatu zakończone sukcesem", "chat_id": new_chat.id})
     except Exception as e:
         print(e)
         return jsonify({"error": "Tworzenie czatu nie powiodło się"}), 400
-
 
 @bp.route('/getChats', methods=['GET'])
 def getChats():
@@ -171,16 +223,46 @@ def sendMessage():
     data = request.get_json()
     chat_id = data.get('chat_id')
     message = data.get('message')
-    new_message = Message(chat_id=chat_id, message=message, author_id=g.current_user.id)
+
+    chat = session.query(Chat).filter_by(id=chat_id).first()
+    if chat.first_user_id == g.current_user.id:
+        recipient_id = chat.second_user_id
+    else:
+        recipient_id = chat.first_user_id
+
+    recipient = session.query(User).filter_by(id=recipient_id).first()
+    encrypted_message = encrypt_message(message, recipient.public_key)
+
+    new_message = Message(chat_id=chat_id, message=encrypted_message, author_id=g.current_user.id)
     session.add(new_message)
     try:
         session.commit()
-        return jsonify({"message": "Wysyłano wiadomość", "chat_id": chat_id})
-    except:
-        return jsonify({"error": "Wysyłanie wiadomości nie powiodło się"}), 400
+        return jsonify({"message": "Wysłano zaszyfrowaną wiadomość", "chat_id": chat_id})
+    except Exception as e:
+        print(e)
+        return jsonify({"error": "Wysyłanie zaszyfrowanej wiadomości nie powiodło się"}), 400
 
+@bp.route('/getMessages', methods=['GET'])
+@login_required
+def getMessages():
+    data = request.get_json()
+    chat_id = data.get('chat_id')
+    chat = session.query(Chat).filter_by(id=chat_id).first()
+    messages = session.query(Message).filter_by(chat_id=chat.id).all()
+    messages_list = []
 
-@bp.route('/CreateGroupChat', methods=['POST'])
+    for message in messages:
+        message_data = {
+            'message_id': message.id,
+            'author_id': message.author_id,
+            'message': message.message,
+            'timestamp': chat.timestamp,
+        }
+        messages_list.append(message_data)
+
+    return jsonify(messages_list)
+
+@bp.route('/createGroupChat', methods=['POST'])
 @login_required
 def createGroupChat():
     data = request.get_json()

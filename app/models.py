@@ -26,6 +26,7 @@ class User(Base):
     is_active = Column(Boolean, default=False)
     last_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     token = Column(String(64), unique=True)
+    public_key = Column(Text)
 
     def set_password(self, password):
         self.password_hash = bcrypt.generate_password_hash(password).decode('utf-8')
@@ -41,8 +42,11 @@ class Chat(Base):
     __tablename__ = 'chats'
 
     id = Column(Integer, primary_key=True)
-    first_user = Column(Integer, unique=False, nullable=False)
-    second_user = Column(Integer, unique=False, nullable=False)
+    first_user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    second_user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+
+    first_user = relationship("User", foreign_keys=[first_user_id])
+    second_user = relationship("User", foreign_keys=[second_user_id])
 
 class Message(Base):
     __tablename__ = 'messages'
