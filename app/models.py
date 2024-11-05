@@ -33,6 +33,9 @@ class User(Base):
     def check_password(self, password):
         return bcrypt.check_password_hash(self.password_hash, password)
 
+    def set_activity(self, activity: bool):
+        self.is_active = activity
+
 
 class Chat(Base):
     __tablename__ = 'chats'

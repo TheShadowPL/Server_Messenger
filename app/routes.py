@@ -21,7 +21,7 @@ def login_required(f):
             return jsonify({"error": "Brak tokenu autoryzacji"}), 401
 
         user = session.query(User).filter_by(token=auth_token).first()
-        if not user or not user.is_active:
+        if not user:
             return jsonify({"error": "Nieautoryzowany dostęp"}), 401
 
         g.current_user = user
@@ -153,6 +153,17 @@ def getChats():
 
     return jsonify(chat_list)
 
+@bp.route('/sendActivity', methods=['POST'])
+@login_required
+def sendActivity():
+    user = session.query(User).get(g.current_user.id)
+    user.set_activity(True)
+    try:
+        session.commit()
+        return jsonify({"message": "Pomyślnie wysłano aktywność do serwera"})
+    except Exception as e:
+        print(e)
+        return jsonify({"message": "Wysłanie aktywności nie powiodło się"})
 
 @bp.route('/sendMessage', methods=['POST'])
 @login_required
