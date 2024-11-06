@@ -2,13 +2,29 @@ import json
 from functools import wraps
 from flask import Blueprint, request, jsonify, g
 from .models import session, User, Chat, Message, GroupChat, GroupMessages
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 import base64
 import secrets
 
 bp = Blueprint('routes', __name__)
+
+def serialize_public_key(public_key):
+    pem = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    return pem.decode('utf-8')
+
+def deserialize_public_key(pem_str):
+    pem = pem_str.encode('utf-8')
+    public_key = serialization.load_pem_public_key(
+        pem,
+        backend=default_backend()
+    )
+    return public_key
 
 def generate_rsa_keys():
     private_key = rsa.generate_private_key(
@@ -22,8 +38,8 @@ def generate_rsa_keys():
 def encrypt_message(message, public_key):
     ciphertext = public_key.encrypt(
         message.encode(),
-        rsa.OAEP(
-            mgf=rsa.MGF1(algorithm=hashes.SHA256()),
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
             algorithm=hashes.SHA256(),
             label=None
         )
@@ -33,8 +49,8 @@ def encrypt_message(message, public_key):
 def decrypt_message(ciphertext, private_key):
     plaintext = private_key.decrypt(
         base64.b64decode(ciphertext),
-        rsa.OAEP(
-            mgf=rsa.MGF1(algorithm=hashes.SHA256()),
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
             algorithm=hashes.SHA256(),
             label=None
         )
@@ -76,13 +92,17 @@ def register():
 
     private_key, public_key = generate_rsa_keys()
 
+    private_key_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption()
+    ).decode()
+
     new_user = User(
         username=username,
         email=email,
-        public_key=public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        ).decode()
+        public_key=serialize_public_key(public_key),
+        private_key=private_key_pem
     )
     new_user.set_password(password)
     session.add(new_user)
@@ -92,6 +112,14 @@ def register():
         "message": "Rejestracja zakończona sukcesem",
         "user_id": new_user.id
     })
+
+def serialize_public_key(public_key):
+    """Serializuje klucz publiczny do formatu PEM"""
+    pem = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    return pem.decode('utf-8')
 
 
 @bp.route('/login', methods=['POST'])
@@ -123,19 +151,6 @@ def logout():
     current_user.token = None
     session.commit()
     return jsonify({"message": "Wylogowano pomyślnie"})
-
-
-@bp.route('/protected', methods=['GET'])
-@login_required
-def protected():
-    return jsonify({
-        "message": f"Witaj {g.current_user.username}! To jest chroniona trasa.",
-        "user_data": {
-            "id": g.current_user.id,
-            "username": g.current_user.username,
-            "email": g.current_user.email
-        }
-    })
 
 
 @bp.route('/getUsers', methods=['GET'])
@@ -217,50 +232,102 @@ def sendActivity():
         print(e)
         return jsonify({"message": "Wysłanie aktywności nie powiodło się"})
 
+
 @bp.route('/sendMessage', methods=['POST'])
 @login_required
 def sendMessage():
-    data = request.get_json()
-    chat_id = data.get('chat_id')
-    message = data.get('message')
-
-    chat = session.query(Chat).filter_by(id=chat_id).first()
-    if chat.first_user_id == g.current_user.id:
-        recipient_id = chat.second_user_id
-    else:
-        recipient_id = chat.first_user_id
-
-    recipient = session.query(User).filter_by(id=recipient_id).first()
-    encrypted_message = encrypt_message(message, recipient.public_key)
-
-    new_message = Message(chat_id=chat_id, message=encrypted_message, author_id=g.current_user.id)
-    session.add(new_message)
     try:
+        data = request.get_json()
+        chat_id = data.get('chat_id')
+        message = data.get('message')
+
+        chat = session.query(Chat).filter_by(id=chat_id).first()
+        if not chat:
+            return jsonify({"error": "Chat nie istnieje"}), 404
+
+        if chat.first_user_id == g.current_user.id:
+            recipient_id = chat.second_user_id
+        else:
+            recipient_id = chat.first_user_id
+
+        recipient = session.query(User).filter_by(id=recipient_id).first()
+        if not recipient or not recipient.public_key:
+            return jsonify({"error": "Nie znaleziono klucza publicznego odbiorcy"}), 400
+
+        # Deserializacja klucza publicznego odbiorcy
+        recipient_public_key = deserialize_public_key(recipient.public_key)
+
+        # Szyfrowanie wiadomości
+        encrypted_message = encrypt_message(message, recipient_public_key)
+
+        new_message = Message(
+            chat_id=chat_id,
+            message=encrypted_message,
+            author_id=g.current_user.id
+        )
+        session.add(new_message)
         session.commit()
-        return jsonify({"message": "Wysłano zaszyfrowaną wiadomość", "chat_id": chat_id})
+
+        return jsonify({
+            "message": "Wysłano zaszyfrowaną wiadomość",
+            "chat_id": chat_id
+        })
     except Exception as e:
-        print(e)
-        return jsonify({"error": "Wysyłanie zaszyfrowanej wiadomości nie powiodło się"}), 400
+        session.rollback()
+        return jsonify({"error": f"Błąd podczas wysyłania wiadomości: {str(e)}"}), 500
 
 @bp.route('/getMessages', methods=['GET'])
 @login_required
 def getMessages():
-    data = request.get_json()
-    chat_id = data.get('chat_id')
-    chat = session.query(Chat).filter_by(id=chat_id).first()
-    messages = session.query(Message).filter_by(chat_id=chat.id).all()
-    messages_list = []
+    try:
+        chat_id = request.args.get('chat_id')
+        if not chat_id:
+            return jsonify({"error": "Nie podano chat_id"}), 400
 
-    for message in messages:
-        message_data = {
-            'message_id': message.id,
-            'author_id': message.author_id,
-            'message': message.message,
-            'timestamp': chat.timestamp,
-        }
-        messages_list.append(message_data)
+        chat = session.query(Chat).filter_by(id=chat_id).first()
+        if not chat:
+            return jsonify({"error": "Chat nie istnieje"}), 404
 
-    return jsonify(messages_list)
+        messages = session.query(Message).filter_by(chat_id=chat.id).all()
+        messages_list = []
+
+        current_user = session.query(User).filter_by(id=g.current_user.id).first()
+        if not current_user or not current_user.private_key:
+            return jsonify({"error": "Nie znaleziono klucza prywatnego użytkownika"}), 404
+
+        # Deserializacja klucza prywatnego użytkownika
+        user_private_key = serialization.load_pem_private_key(
+            current_user.private_key.encode('utf-8'),
+            password=None,
+            backend=default_backend()
+        )
+
+        for message in messages:
+            try:
+                decrypted_message = message.message
+                if message.author_id != g.current_user.id:
+                    decrypted_message = decrypt_message(message.message, user_private_key)
+
+                message_data = {
+                    'message_id': message.id,
+                    'author_id': message.author_id,
+                    'message': decrypted_message,
+                    'timestamp': message.timestamp.isoformat() if message.timestamp else None,
+                }
+                messages_list.append(message_data)
+            except Exception as e:
+                message_data = {
+                    'message_id': message.id,
+                    'author_id': message.author_id,
+                    'message': "Nie można odszyfrować wiadomości",
+                    'error': str(e),
+                    'timestamp': message.timestamp.isoformat() if message.timestamp else None,
+                }
+                messages_list.append(message_data)
+
+        return jsonify(messages_list)
+    except Exception as e:
+        return jsonify({"error": f"Błąd podczas pobierania wiadomości: {str(e)}"}), 500
 
 @bp.route('/createGroupChat', methods=['POST'])
 @login_required

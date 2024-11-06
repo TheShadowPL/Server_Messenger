@@ -27,6 +27,7 @@ class User(Base):
     last_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     token = Column(String(64), unique=True)
     public_key = Column(Text)
+    private_key = Column(Text)
 
     def set_password(self, password):
         self.password_hash = bcrypt.generate_password_hash(password).decode('utf-8')
