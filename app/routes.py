@@ -213,8 +213,8 @@ def getChats():
     for chat in chats:
         chat_data = {
             'chat_id': chat.id,
-            'first_user': chat.first_user,
-            'second_user': chat.second_user,
+            'first_user': chat.first_user_id,
+            'second_user': chat.second_user_id,
         }
         chat_list.append(chat_data)
 
