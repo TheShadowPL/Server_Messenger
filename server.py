@@ -1,11 +1,12 @@
 from threading import Thread
 from time import sleep
+from flask_cors import CORS
 from datetime import datetime, timedelta, timezone
 from app import create_app
 from app.models import session, User
 
 app = create_app()
-
+CORS(app)
 
 def check_user_activity():
     while True:
