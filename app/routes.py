@@ -173,8 +173,7 @@ def getUsers():
 
 @bp.route('/getActivity', methods=['GET'])
 def getActivity():
-    data = request.get_json()
-    user_id = data.get('user_id')
+    user_id = request.args.get('user_id')
     user = session.query(User).get(user_id)
     return jsonify({'isActive': user.is_active})
 
