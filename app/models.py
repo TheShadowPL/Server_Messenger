@@ -55,6 +55,7 @@ class Message(Base):
     id = Column(Integer, primary_key=True)
     chat_id = Column(Integer, ForeignKey('chats.id'), nullable=False)
     message = Column(Text, nullable=False)
+    message_for_sender = Column(Text, nullable=False)
     author_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

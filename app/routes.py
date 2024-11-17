@@ -138,7 +138,6 @@ def login():
             "message": "Zalogowano pomyślnie",
             "user_id": user.id,
             "token": user.token,
-            "public_key": user.public_key
         })
     else:
         return jsonify({"error": "Nieprawidłowa nazwa użytkownika lub hasło"}), 401
@@ -250,18 +249,21 @@ def sendMessage():
             recipient_id = chat.first_user_id
 
         recipient = session.query(User).filter_by(id=recipient_id).first()
-        if not recipient or not recipient.public_key:
-            return jsonify({"error": "Nie znaleziono klucza publicznego odbiorcy"}), 400
+        sender = session.query(User).filter_by(id=g.current_user.id).first()
 
-        # Deserializacja klucza publicznego odbiorcy
+        if not recipient or not recipient.public_key or not sender or not sender.public_key:
+            return jsonify({"error": "Nie znaleziono kluczy publicznych"}), 400
+
         recipient_public_key = deserialize_public_key(recipient.public_key)
+        sender_public_key = deserialize_public_key(sender.public_key)
 
-        # Szyfrowanie wiadomości
-        encrypted_message = encrypt_message(message, recipient_public_key)
+        message_for_recipient = encrypt_message(message, recipient_public_key)
+        message_for_sender = encrypt_message(message, sender_public_key)
 
         new_message = Message(
             chat_id=chat_id,
-            message=encrypted_message,
+            message=message_for_recipient,
+            message_for_sender=message_for_sender,
             author_id=g.current_user.id
         )
         session.add(new_message)
@@ -275,6 +277,7 @@ def sendMessage():
         session.rollback()
         return jsonify({"error": f"Błąd podczas wysyłania wiadomości: {str(e)}"}), 500
 
+
 @bp.route('/getMessages', methods=['GET'])
 @login_required
 def getMessages():
@@ -287,6 +290,9 @@ def getMessages():
         if not chat:
             return jsonify({"error": "Chat nie istnieje"}), 404
 
+        if g.current_user.id not in [chat.first_user_id, chat.second_user_id]:
+            return jsonify({"error": "Brak dostępu do czatu"}), 403
+
         messages = session.query(Message).filter_by(chat_id=chat.id).all()
         messages_list = []
 
@@ -294,7 +300,6 @@ def getMessages():
         if not current_user or not current_user.private_key:
             return jsonify({"error": "Nie znaleziono klucza prywatnego użytkownika"}), 404
 
-        # Deserializacja klucza prywatnego użytkownika
         user_private_key = serialization.load_pem_private_key(
             current_user.private_key.encode('utf-8'),
             password=None,
@@ -303,9 +308,14 @@ def getMessages():
 
         for message in messages:
             try:
-                decrypted_message = message.message
-                if message.author_id != g.current_user.id:
-                    decrypted_message = decrypt_message(message.message, user_private_key)
+                is_sender = message.author_id == g.current_user.id
+
+                if is_sender:
+                    encrypted_message = message.message_for_sender
+                else:
+                    encrypted_message = message.message
+
+                decrypted_message = decrypt_message(encrypted_message, user_private_key)
 
                 message_data = {
                     'message_id': message.id,
@@ -315,6 +325,7 @@ def getMessages():
                 }
                 messages_list.append(message_data)
             except Exception as e:
+                print(f"Błąd deszyfrowania: {str(e)}")
                 message_data = {
                     'message_id': message.id,
                     'author_id': message.author_id,
