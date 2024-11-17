@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from functools import wraps
 from flask import Blueprint, request, jsonify, g
 from .models import session, User, Chat, Message, GroupChat, GroupMessages
@@ -64,7 +65,6 @@ def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         auth_token = request.headers.get('Authorization')
-        print(auth_token)
         if not auth_token:
             return jsonify({"error": "Brak tokenu autoryzacji"}), 401
 
@@ -130,8 +130,9 @@ def login():
 
     user = session.query(User).filter_by(username=username).first()
     if user and user.check_password(password):
-        user.token = generate_token()
-        user.is_active = True
+        user.set_token(generate_token())
+        user.set_activity(True)
+        user.set_last_seen(datetime.utcnow())
         session.commit()
 
         return jsonify({
@@ -223,6 +224,7 @@ def getChats():
 def sendActivity():
     user = session.query(User).get(g.current_user.id)
     user.set_activity(True)
+    user.set_last_seen = datetime.utcnow()
     try:
         session.commit()
         return jsonify({"message": "Pomyślnie wysłano aktywność do serwera"})

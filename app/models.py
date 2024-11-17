@@ -38,6 +38,11 @@ class User(Base):
     def set_activity(self, activity: bool):
         self.is_active = activity
 
+    def set_last_seen(self, last_seen: datetime):
+        self.last_seen = last_seen
+
+    def set_token(self, token: str):
+        self.token = token
 
 class Chat(Base):
     __tablename__ = 'chats'
