@@ -435,3 +435,24 @@ def get_group_messages():
     ]
 
     return jsonify(messages_list), 200
+
+
+@bp.route('/getGroupChats', methods=['GET'])
+@login_required
+def get_group_chats():
+    group_chats = session.query(GroupChat).all()
+
+    chats_data = []
+    for chat in group_chats:
+        try:
+            members = json.loads(chat.members)
+            if g.current_user.id in members:
+                chats_data.append({
+                    'id': chat.id,
+                    'members': members,
+                })
+        except json.JSONDecodeError:
+            print("Problem podczas parsowania JSON'a w krotce " + chat.id)
+            continue
+
+    return chats_data, 200
