@@ -27,7 +27,6 @@ class User(Base):
     last_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     token = Column(String(64), unique=True)
     public_key = Column(Text)
-    private_key = Column(Text)
 
     def set_password(self, password):
         self.password_hash = bcrypt.generate_password_hash(password).decode('utf-8')
@@ -54,14 +53,22 @@ class Chat(Base):
     first_user = relationship("User", foreign_keys=[first_user_id])
     second_user = relationship("User", foreign_keys=[second_user_id])
 
+# class Message(Base):
+#     __tablename__ = 'messages'
+#
+#     id = Column(Integer, primary_key=True)
+#     chat_id = Column(Integer, ForeignKey('chats.id'), nullable=False)
+#     message = Column(Text, nullable=False)
+#     message_for_sender = Column(Text, nullable=False)
+#     author_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+#     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
 class Message(Base):
     __tablename__ = 'messages'
-
     id = Column(Integer, primary_key=True)
-    chat_id = Column(Integer, ForeignKey('chats.id'), nullable=False)
+    chat_id = Column(Integer, ForeignKey('chats.id'))
     message = Column(Text, nullable=False)
-    message_for_sender = Column(Text, nullable=False)
-    author_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    author_id = Column(Integer, ForeignKey('users.id'))
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 class GroupChat(Base):

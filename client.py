@@ -1,7 +1,13 @@
+import base64
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization, hashes
+import os
 import requests
 import threading
 import time
 from datetime import datetime
+import os
+
 
 BASE_URL = "http://localhost:5001"
 
@@ -9,29 +15,127 @@ session_info = {
     "current_user": None,
 }
 
+
+def generate_rsa_keys():
+    try:
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+        )
+        public_key = private_key.public_key()
+        return private_key, public_key
+    except Exception as e:
+        print(f"Błąd podczas generowania kluczy RSA: {e}")
+
+def save_private_key(username, private_key):
+    try:
+        pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+        with open(f"{username}_private_key.pem", "wb") as f:
+            f.write(pem)
+        print(f"Klucz prywatny zapisany dla użytkownika: {username}")
+    except Exception as e:
+        print(f"Błąd przy zapisywaniu klucza prywatnego: {e}")
+
+def load_private_key(username):
+    try:
+        with open(f"{username}_private_key.pem", "rb") as f:
+            private_key = serialization.load_pem_private_key(
+                f.read(),
+                password=None
+            )
+        print(f"Klucz prywatny wczytany dla użytkownika: {username}")
+        return private_key
+    except Exception as e:
+        print(f"Błąd przy wczytywaniu klucza prywatnego: {e}")
+
+def encrypt_message(message, recipient_public_key_pem):
+    try:
+        public_key = serialization.load_pem_public_key(recipient_public_key_pem.encode())
+        encrypted = public_key.encrypt(
+            message.encode(),
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        print(f"Wiadomość zaszyfrowana: {message}")
+        return base64.b64encode(encrypted).decode()
+    except Exception as e:
+        print(f"Błąd podczas szyfrowania wiadomości: {e}")
+        return None
+
+def decrypt_message(encrypted_message, private_key):
+    try:
+        decrypted = private_key.decrypt(
+            base64.b64decode(encrypted_message),
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        print(f"Wiadomość odszyfrowana: {decrypted.decode()}")
+        return decrypted.decode()
+    except Exception as e:
+        print(f"Błąd podczas odszyfrowywania wiadomości: {e}")
+        return None
+
+def register_user(username, password, email):
+    private_key, public_key = generate_rsa_keys()
+
+    private_key_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption()
+    ).decode()
+
+    public_key_pem = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode()
+
+    with open(f"{username}_private_key.pem", "w") as f:
+        f.write(private_key_pem)
+
+    url = f"{BASE_URL}/register"
+    response = requests.post(url, json={"username": username, "email": email, "password": password, "public_key": public_key_pem})
+    return response.json()
+
+
 def get_headers():
     if session_info.get("current_user"):
         return {"Authorization": f"{session_info['current_user']['token']}"}
     return {}
 
 def register_user(username, password, email):
-    url = f"{BASE_URL}/register"
     try:
-        response = requests.post(url, json={"username": username, "email": email, "password": password})
+        private_key, public_key = generate_rsa_keys()
+        save_private_key(username, private_key)
+
+        public_key_pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        ).decode()
+
+        url = f"{BASE_URL}/register"
+        response = requests.post(url, json={
+            "username": username,
+            "email": email,
+            "password": password,
+            "public_key": public_key_pem
+        })
         response.raise_for_status()
         data = response.json()
-        if "user_id" in data:
-            session_info["current_user"] = {"username": username, "user_id": data["user_id"], "email": email, "hasło": password}
+        print("Rejestracja zakończona:", data)
         return data
-    except requests.exceptions.JSONDecodeError:
-        print("Błąd dekodowania JSON z odpowiedzi serwera. Odpowiedź:")
-        print(response.text)
-        return {"error": "Nie udało się zdekodować odpowiedzi JSON"}
     except requests.exceptions.RequestException as e:
-        print(f"Błąd zapytania: {e}")
-        print("Treść odpowiedzi serwera:")
-        print(response.text)
-        return {"error": "Błąd połączenia lub zapytania"}
+        print(f"Błąd rejestracji użytkownika: {e}")
+        return {"error": "Nie udało się zarejestrować użytkownika"}
 
 def login_user(username, password):
     url = f"{BASE_URL}/login"
@@ -62,9 +166,73 @@ def create_chat(first_user_id, second_user_id):
     except requests.exceptions.RequestException as e:
         print("Nie mozna bylo utworzyc czatu", e)
 
-def send_message(content):
-    print('Wysłano wiadomosc : ' + content)
 
+def get_recipient_public_key(recipient_id):
+    try:
+        if not session_info.get("current_user") or not session_info["current_user"].get("token"):
+            print("Błąd: Użytkownik nie jest zalogowany lub brak tokenu")
+            return None
+
+        token = session_info["current_user"]["token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        url = f"{BASE_URL}/getPublicKey?user_id={recipient_id}"
+
+        print("Nagłówki żądania:", headers)
+        print("Adres URL żądania:", url)
+
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        print("Pobrano klucz publiczny odbiorcy:", data)
+        return data.get("public_key")
+    except requests.exceptions.HTTPError as http_err:
+        print(f"Błąd HTTP: {http_err.response.status_code} - {http_err.response.text}")
+    except requests.exceptions.RequestException as req_err:
+        print(f"Błąd przy pobieraniu klucza publicznego: {req_err}")
+    return None
+
+def send_message(chat_id, recipient_id, message):
+    try:
+        recipient_public_key = get_recipient_public_key(recipient_id)
+        if not recipient_public_key:
+            print("Nie można pobrać klucza publicznego odbiorcy")
+            return {"error": "Brak klucza publicznego odbiorcy"}
+
+        encrypted_message = encrypt_message(message, recipient_public_key)
+        headers = {"Authorization": f"Bearer {session_info['current_user']['token']}"}
+
+        url = f"{BASE_URL}/sendMessage"
+        response = requests.post(url, json={
+            "chat_id": chat_id,
+            "message": encrypted_message
+        }, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        print("Wiadomość wysłana:", data)
+        return data
+    except requests.exceptions.RequestException as e:
+        print(f"Błąd przy wysyłaniu wiadomości: {e}")
+        return {"error": "Nie udało się wysłać wiadomości"}
+
+def get_messages(chat_id):
+    try:
+        headers = {"Authorization": f"Bearer {session_info['current_user']['token']}"}
+        url = f"{BASE_URL}/getMessages?chat_id={chat_id}"
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        messages = response.json()
+
+        private_key = load_private_key(session_info["current_user"]["username"])
+        print("\n--- Wiadomości w czacie ---")
+        for msg in messages:
+            try:
+                decrypted_message = decrypt_message(msg["message"], private_key)
+                print(f"ID Nadawcy: {msg['author_id']}, Czas: {msg['timestamp']}")
+                print(f"Wiadomość: {decrypted_message}\n")
+            except Exception as e:
+                print(f"Błąd podczas odszyfrowywania wiadomości (ID: {msg['message_id']}): {e}")
+    except requests.exceptions.RequestException as e:
+        print(f"Błąd przy pobieraniu wiadomości: {e}")
 
 def send_group_message(group_chat_id, content):
     if not session_info.get("current_user"):
@@ -187,8 +355,24 @@ def get_chats():
         print("Nie mozna bylo uzyskac czatow", e)
 
 
-def get_messages():
-    print('Wiadomosci :')
+def get_messages(chat_id):
+    try:
+        headers = {"Authorization": f"Bearer {session_info['current_user']['token']}"}
+        url = f"{BASE_URL}/getMessages?chat_id={chat_id}"
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        messages = response.json()
+
+        private_key = load_private_key(session_info["current_user"]["username"])
+        print("\n--- Wiadomości w czacie ---")
+        for msg in messages:
+            try:
+                decrypted_message = decrypt_message(msg["message"], private_key)
+                print(f"ID Nadawcy: {msg['author_id']}, Wiadomość: {decrypted_message}")
+            except Exception as e:
+                print(f"Błąd podczas odszyfrowywania wiadomości: {e}")
+    except requests.exceptions.RequestException as e:
+        print(f"Błąd przy pobieraniu wiadomości: {e}")
 
 
 def select_chat(chat_id):
@@ -235,8 +419,10 @@ def main():
             print(create_chat(first_user_id, second_user_id))
 
         elif choice == "4":
-            content = input("Podaj treść wiadomości: ")
-            print(send_message(content))
+            chat_id = input("Podaj ID czatu: ")
+            recipient_id = input("Podaj ID odbiorcy: ")
+            message = input("Podaj treść wiadomości: ")
+            print(send_message(chat_id, recipient_id, message))
 
         elif choice == "5":
             members = input("Podaj listę ID członków (oddzielone przecinkami): ").split(",")
@@ -256,6 +442,9 @@ def main():
         elif choice == "8":
             group_chat_id = input("Podaj ID czatu grupowego, którego wiadomości chcesz zobaczyć: ")
             get_group_messages(group_chat_id)
+        elif choice == "10":
+            caht_id = input("Podaj ID czatu:")
+            get_messages(caht_id)
 
         elif choice == "11":
             chat_id = int(input("Podaj ID czatu, który chcesz wybrać: "))
