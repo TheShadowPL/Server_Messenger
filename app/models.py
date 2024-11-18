@@ -44,23 +44,12 @@ class User(Base):
     def set_token(self, token: str):
         self.token = token
 
-class Chat(Base):
-    __tablename__ = 'chats'
-
-    id = Column(Integer, primary_key=True)
-    first_user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
-    second_user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
-
-    first_user = relationship("User", foreign_keys=[first_user_id])
-    second_user = relationship("User", foreign_keys=[second_user_id])
-
 class Message(Base):
     __tablename__ = 'messages'
 
     id = Column(Integer, primary_key=True)
-    chat_id = Column(Integer, ForeignKey('chats.id'), nullable=False)
+    to_user = Column(Integer, ForeignKey('users.id'), nullable=False)
     message = Column(Text, nullable=False)
-    message_for_sender = Column(Text, nullable=False)
     author_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
